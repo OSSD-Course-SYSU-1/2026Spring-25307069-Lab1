@@ -1,0 +1,1 @@
+I plan to optimize the code structure and add more detailed comments to improve readability.
