@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Copyright (c) 2026 Huawei Device Co., Ltd.
+<!-- Copyright (c) 2021 Huawei Device Co., Ltd.
 
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
-                <filteritem type="filename" name="*.jpg|*.png|*.gif|*.pdf|*.xlsm|*.zip|*.ogg|*.mp4|*.svg" desc="already checked"/>
+				<filteritem type="filename" name="*.jpg|*.png|*.gif|*.pdf|*.xlsm|*.zip|*.ogg" desc="already checked"/>
             </filefilter>
         </filefilterlist>
         <licensematcherlist>

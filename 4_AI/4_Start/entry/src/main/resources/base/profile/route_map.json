@@ -1,0 +1,9 @@
+{
+  "routerMap": [
+    {
+      "name": "Led",
+      "pageSourceFile": "src/main/ets/pages/Led.ets",
+      "buildFunction": "LedBuilder"
+    }
+  ]
+}
