@@ -1,0 +1,10 @@
+# ninja log v6
+22	1429	7984651519717802	CMakeFiles/player.dir/capabilities/src/AudioDecoder.cpp.o	a3407001752d4b1
+28	1473	7984651519777811	CMakeFiles/player.dir/capabilities/src/VideoDecoder.cpp.o	7a1ae599fcb4d6e3
+33	1486	7984651519830518	CMakeFiles/player.dir/capabilities/src/Demuxer.cpp.o	d5dd1bcb61eb3222
+38	1543	7984651519880534	CMakeFiles/player.dir/render/src/XComponentManager.cpp.o	e1c6b016c53f7156
+17	1545	7984651519677811	CMakeFiles/player.dir/capabilities/src/CodecCallback.cpp.o	f582c9cb398e7e33
+43	1566	7984651519940519	CMakeFiles/player.dir/render/src/XComponentRender.cpp.o	c628ae6c0ff0ecba
+4	1611	7984651519547699	CMakeFiles/player.dir/player/src/PlayerNative.cpp.o	992b9663a3c51d82
+10	1899	7984651519607716	CMakeFiles/player.dir/player/src/Player.cpp.o	e46b5fff148a6e87
+1899	2068	7984651538493366	D:/code/DecodePlayControl-master/entry/build/default/intermediates/cmake/default/obj/x86_64/libplayer.so	d95c88824c95a833

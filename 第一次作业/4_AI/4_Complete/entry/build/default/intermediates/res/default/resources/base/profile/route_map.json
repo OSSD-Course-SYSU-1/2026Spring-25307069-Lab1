@@ -1,0 +1,1 @@
+{"routerMap":[{"name":"Led","pageSourceFile":"src/main/ets/pages/Led.ets","buildFunction":"LedBuilder","ohmurl":"@normalized:N&&&entry/src/main/ets/pages/Led&","bundleName":"com.example.led","moduleName":"entry"}]}
