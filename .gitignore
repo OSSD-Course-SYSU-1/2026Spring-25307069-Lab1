@@ -1,0 +1,21 @@
+# 鸿蒙/DevEco Studio 编译缓存，禁止上传
+build/
+oh_modules/
+dist/
+*/build/
+
+# 编辑器缓存文件
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# 系统垃圾文件
+.DS_Store
+shturl.cc
+
+# 临时文件、日志
+*.log
+*.tmp
+*.swp
