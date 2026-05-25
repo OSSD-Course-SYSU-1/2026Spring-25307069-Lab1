@@ -17,6 +17,7 @@ import { resourceManager } from '@kit.LocalizationKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { VideoPlayView } from '../view/VideoPlayView';
 import { VideoPlayViewModel } from '../viewmodel/VideoPlayViewModel';
+import { ThemeColors } from '../common/ThemeColors';
 
 const VIDEO_NAMES = ['1.mp4', '2.mp4', '3.mp4'];
 const TAG = 'INDEX';
@@ -27,6 +28,13 @@ struct Index {
   @State videoResources : resourceManager.RawFileDescriptor[] = [];
   @State viewModel: VideoPlayViewModel = new VideoPlayViewModel();
   @State isFullScreen: boolean = false;
+  @Provide('isDarkTheme') isDarkTheme: boolean = true;
+  @Provide('themeColors') themeColors: ThemeColors = new ThemeColors(true);
+
+  toggleTheme(): void {
+    this.isDarkTheme = !this.isDarkTheme;
+    this.themeColors = new ThemeColors(this.isDarkTheme);
+  }
 
   aboutToAppear(): void {
     try {
@@ -70,5 +78,6 @@ struct Index {
     }
     .width('100%')
     .height('100%')
+    .backgroundColor(this.themeColors.pageBackground)
   }
 }

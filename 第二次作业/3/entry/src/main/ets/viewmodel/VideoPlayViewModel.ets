@@ -41,6 +41,10 @@ export class VideoPlayViewModel {
   @Track chooseNumber: number = -1;
   @Track chooseSpeed: number = Const.VIDEO_DEFAULT_SPEED;
   @Track isUse: boolean = false;
+  @Track controlsVisible: boolean = true;
+  // Controls auto-hide timer
+  private controlsHideTimerId: number = -1;
+  private readonly CONTROLS_HIDE_DELAY: number = 5000; // 5 seconds
   @Track isSpeedListVisible: boolean = false;
   @Track isSwitchEnable: boolean = true;
   @Track currentTime: number = 0;
@@ -55,6 +59,15 @@ export class VideoPlayViewModel {
 
   // Ambient light manager
   @Track ambientLightManager: AmbientLightManager = new AmbientLightManager();
+
+  // Ambient light color - updated based on video playback state
+  @Track ambientLightColor: string = '#FF6600';
+  private ambientLightTimerId: number = -1;
+  private ambientLightColorIndex: number = 0;
+  private readonly ambientLightPalette: string[] = [
+    '#FF6600', '#3366FF', '#FF3366', '#33CC66',
+    '#9933FF', '#FFCC00', '#FF3333', '#33CCCC'
+  ];
 
   public videoSources: resourceManager.RawFileDescriptor[] = [];
   private danmakuIdCounter: number = 0;
@@ -121,17 +134,49 @@ export class VideoPlayViewModel {
           const renderTime = player.getRenderTime(this.nativePlayerObj);
           this.currentTime = renderTime / Const.TIME_RATIO;
         } catch (error) {
-          hilog.error(DOMAIN, TAG, `getRenderTime failed: ${error.code}, message: ${error.message}`);
+          hilog.error(DOMAIN, TAG, `getRenderTime failed`);
         }
       }
     }, Const.TIME_INTERVAL);
     this.startDanmakuTimer();
+    this.startAmbientLightTimer();
   }
 
   stopTimer(): void {
     if (this.timerId !== -1) {
       clearInterval(this.timerId);
       this.timerId = -1;
+    }
+    this.stopAmbientLightTimer();
+  }
+
+  /**
+   * Start ambient light color timer - only updates when video is playing
+   */
+  private startAmbientLightTimer(): void {
+    this.stopAmbientLightTimer();
+    this.ambientLightTimerId = setInterval(() => {
+      // Only update color when video is playing (not paused)
+      if (this.playState === PlayerState.PLAYING) {
+        // Calculate color index based on current playback time
+        // This simulates color following video content
+        const timeBasedIndex = Math.floor(this.currentTime / 2) % this.ambientLightPalette.length;
+        if (timeBasedIndex !== this.ambientLightColorIndex) {
+          this.ambientLightColorIndex = timeBasedIndex;
+          this.ambientLightColor = this.ambientLightPalette[this.ambientLightColorIndex];
+          hilog.info(DOMAIN, TAG, `Ambient light color changed to: ${this.ambientLightColor}`);
+        }
+      }
+    }, 500); // Check every 500ms
+  }
+
+  /**
+   * Stop ambient light color timer
+   */
+  private stopAmbientLightTimer(): void {
+    if (this.ambientLightTimerId !== -1) {
+      clearInterval(this.ambientLightTimerId);
+      this.ambientLightTimerId = -1;
     }
   }
 
@@ -207,37 +252,34 @@ export class VideoPlayViewModel {
     }
     if (playState === PlayerState.PLAYING) {
       player.pause(this.nativePlayerObj);
+      // Paused: stop auto-hide, keep controls visible
+      this.stopControlsHideTimer();
       return PlayerState.PAUSE;
     } else if (playState === PlayerState.PAUSE) {
       player.resume(this.nativePlayerObj);
+      // Resumed: restart auto-hide
+      this.startControlsHideTimer();
       return PlayerState.PLAYING;
     }
     return playState;
   }
 
-  onSliderChange(value: number, mode: SliderChangeMode): void {
-    this.currentTime = value;
-    if (this.durationTime > 0) {
-      if (mode === SliderChangeMode.Begin) {
-        this.isSeek = true;
-      }
-      if (mode === SliderChangeMode.End) {
-        this.performSeek(value);
-      }
-    }
-  }
-
   async performSeek(value: number): Promise<void> {
     if (this.nativePlayerObj === BigInt(0)) {
+      this.isSeek = false;
       return;
     }
     try {
+      hilog.info(DOMAIN, TAG, `Performing seek to ${value}s`);
       await player.seekVideo(this.nativePlayerObj, value);
+      // Keep isSeek true for a short time to allow player to stabilize
       setTimeout(() => {
         this.isSeek = false;
+        hilog.info(DOMAIN, TAG, `Seek complete, isSeek=${this.isSeek}`);
       }, Const.RELOAD_TIME);
     } catch (error) {
-      hilog.error(DOMAIN, TAG, `Seek failed: ${error.code}, message: ${error.message}`);
+      hilog.error(DOMAIN, TAG, `Seek failed`);
+      this.isSeek = false;
     }
   }
 
@@ -251,6 +293,63 @@ export class VideoPlayViewModel {
 
   hideColorPanel(): void {
     this.isColorPanelVisible = false;
+  }
+
+  /**
+   * Show controls and start auto-hide timer
+   */
+  showControls(): void {
+    if (!this.isUse) {
+      return;
+    }
+    this.stopControlsHideTimer();
+    this.controlsVisible = true;
+    this.startControlsHideTimer();
+  }
+
+  /**
+   * Toggle controls visibility
+   */
+  toggleControls(): void {
+    if (!this.isUse) {
+      return;
+    }
+    // When paused, never hide controls
+    if (this.playState === PlayerState.PAUSE) {
+      if (!this.controlsVisible) {
+        this.showControls();
+      }
+      return;
+    }
+    if (this.controlsVisible) {
+      // Already visible: just reset the auto-hide timer
+      this.startControlsHideTimer();
+    } else {
+      this.showControls();
+    }
+  }
+
+  /**
+   * Hide controls immediately
+   */
+  private hideControls(): void {
+    this.controlsVisible = false;
+    this.stopControlsHideTimer();
+  }
+
+  private startControlsHideTimer(): void {
+    this.stopControlsHideTimer();
+    this.controlsHideTimerId = setTimeout(() => {
+      this.controlsVisible = false;
+      this.controlsHideTimerId = -1;
+    }, this.CONTROLS_HIDE_DELAY);
+  }
+
+  private stopControlsHideTimer(): void {
+    if (this.controlsHideTimerId !== -1) {
+      clearTimeout(this.controlsHideTimerId);
+      this.controlsHideTimerId = -1;
+    }
   }
 
   selectDanmakuColor(color: string): void {
@@ -323,6 +422,8 @@ export class VideoPlayViewModel {
       if (data.code === 0) {
         this.durationTime = data.durationTime / Const.TIME_RATIO;
         this.isUse = true;
+        this.controlsVisible = true;
+        this.startControlsHideTimer();
         this.isSwitchEnable = true;
         // Initialize ambient light with video dimensions
         if (data.videoWidth && data.videoHeight) {
@@ -352,6 +453,20 @@ export class VideoPlayViewModel {
         hilog.error(DOMAIN, TAG, `Release player failed: ${error.code}, message: ${error.message}`);
       }
     }
+  }
+
+  // === Gesture Control Methods ===
+
+  /**
+   * Seek forward/backward by delta seconds
+   */
+  async seekByDelta(deltaSeconds: number): Promise<void> {
+    if (this.nativePlayerObj === BigInt(0) || !this.isUse) {
+      return;
+    }
+    const newTime = Math.max(0, Math.min(this.currentTime + deltaSeconds, this.durationTime));
+    await this.performSeek(newTime);
+    hilog.info(DOMAIN, TAG, `Seek by ${deltaSeconds}s to ${newTime}s`);
   }
 
   async cleanup(): Promise<void> {

@@ -22,6 +22,7 @@ import { CommonConstants as Const } from '../common/CommonConstants';
 import { VideoPlayViewModel, DanmakuItem } from '../viewmodel/VideoPlayViewModel';
 import { AmbientLightView } from '../ambientlight/AmbientLightView';
 import { AmbientLightControlPanel } from '../ambientlight/AmbientLightControlPanel';
+import { ThemeColors } from '../common/ThemeColors';
 
 const DOMAIN = 0xFF00;
 const TAG = 'VideoPlayView';
@@ -39,17 +40,41 @@ export struct VideoPlayView {
   @Watch('fullScreenSet') @Link isFullScreen: boolean;
   // [End isFullScreen]
 
-  // Shared state for ambient light
+  // Shared state for ambient light - enabled state only
   @Provide('ambientLightEnabled') ambientLightEnabled: boolean = false;
-  @Provide('ambientLightColor') ambientLightColor: string = '#FF6600';
+  @Consume('themeColors') themeColors: ThemeColors = new ThemeColors(true);
+  @Consume('isDarkTheme') isDarkTheme: boolean = true;
+
+  private toggleTheme(): void {
+    this.isDarkTheme = !this.isDarkTheme;
+    this.themeColors = new ThemeColors(this.isDarkTheme);
+  }
+
+  // Gesture state for seek
+  private gestureStartX: number = 0;
+  private gestureSeekDelta: number = 0;
+
+  // Slider local state
+  @State localSliderValue: number = 0;
+  private isSliderDragging: boolean = false;
+  private sliderSyncTimerId: number = -1;
 
   aboutToAppear(): void {
     this.viewModel.videoSources = this.videoSources;
     this.viewModel.setUIContext(this.getUIContext());
     this.viewModel.initialize();
+    // Start slider sync timer
+    this.sliderSyncTimerId = setInterval(() => {
+      if (!this.isSliderDragging) {
+        this.localSliderValue = this.viewModel.currentTime;
+      }
+    }, 100);
   }
 
   aboutToDisappear(): void {
+    if (this.sliderSyncTimerId !== -1) {
+      clearInterval(this.sliderSyncTimerId);
+    }
     this.viewModel.cleanup();
   }
 
@@ -85,6 +110,31 @@ export struct VideoPlayView {
         .width('100%')
         .height(this.isFullScreen ? '100%' : '100%')
         .clip(true)
+        .parallelGesture(
+          TapGesture({ count: 1 })
+            .onAction(() => {
+              if (this.viewModel.isUse) {
+                this.viewModel.toggleControls();
+              }
+            })
+        )
+        .parallelGesture(
+          PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 20 })
+            .onActionStart((event: GestureEvent) => {
+              this.gestureStartX = event.fingerList[0].localX;
+              this.gestureSeekDelta = 0;
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              const deltaX = event.fingerList[0].localX - this.gestureStartX;
+              this.gestureSeekDelta = (deltaX / 100) * 30;
+            })
+            .onActionEnd(() => {
+              if (Math.abs(this.gestureSeekDelta) > 0.5) {
+                this.viewModel.seekByDelta(this.gestureSeekDelta);
+              }
+              this.gestureSeekDelta = 0;
+            })
+        )
       }
       .width('100%')
       .height(this.isFullScreen ? '100%' : '35%')
@@ -119,6 +169,7 @@ export struct VideoPlayView {
   @Builder
   AmbientLightOverlay() {
     AmbientLightView({
+      ambientLightColor: this.viewModel.ambientLightColor,
       isFullScreen: this.isFullScreen
     })
       .width('100%')
@@ -160,8 +211,14 @@ export struct VideoPlayView {
     .height('100%')
     .justifyContent(FlexAlign.End)
     .padding({ left: '16vp', right: '16vp' })
-    .visibility(this.viewModel.isUse ? Visibility.Visible : Visibility.Hidden)
+    .visibility(this.viewModel.isUse && this.viewModel.controlsVisible ? Visibility.Visible : Visibility.Hidden)
     .zIndex(10)
+    .gesture(
+      TapGesture({ count: 2 })
+        .onAction(() => {
+          this.viewModel.playState = this.viewModel.togglePlayPause(this.viewModel.playState);
+        })
+    )
   }
 
   @Builder
@@ -221,12 +278,12 @@ export struct VideoPlayView {
   @Builder
   TimeSlider() {
     Row() {
-      Text(getShowTime(this.viewModel.currentTime))
+      Text(getShowTime(this.isSliderDragging ? this.localSliderValue : this.viewModel.currentTime))
         .fontColor(Color.White)
         .fontSize('12fp')
 
       Slider({
-        value: this.viewModel.currentTime,
+        value: this.localSliderValue,
         min: 0,
         max: this.viewModel.durationTime
       })
@@ -234,8 +291,17 @@ export struct VideoPlayView {
         .selectedColor('#F67609')
         .trackColor('#464642')
         .enabled(!this.viewModel.isSeek)
-        .onChange((value: number, mode: SliderChangeMode) => {
-          this.viewModel.onSliderChange(value, mode);
+        .onChange((value: number) => {
+          this.localSliderValue = value;
+        })
+        .onTouch((event: TouchEvent) => {
+          if (event.type === TouchType.Down) {
+            this.isSliderDragging = true;
+          } else if (event.type === TouchType.Up) {
+            this.isSliderDragging = false;
+            this.viewModel.currentTime = this.localSliderValue;
+            this.viewModel.performSeek(this.localSliderValue);
+          }
         })
 
       Text(getShowTime(this.viewModel.durationTime))
@@ -336,7 +402,7 @@ export struct VideoPlayView {
         Text($r('app.string.Video_name'))
           .fontSize('24fp')
           .fontWeight(FontWeight.Bold)
-          .fontColor(Color.White)
+          .fontColor(this.themeColors.primaryText)
       }
       .width('100%')
       .height('20%')
@@ -350,9 +416,9 @@ export struct VideoPlayView {
           .width('160vp')
           .height('40vp')
           .fontSize('14fp')
-          .fontColor(Color.White)
-          .placeholderColor('#A6A6A6')
-          .backgroundColor('#2A2A2A')
+          .fontColor(this.themeColors.primaryText)
+          .placeholderColor(this.themeColors.secondaryText)
+          .backgroundColor(this.themeColors.inputBackground)
           .borderRadius('20vp')
           .margin({ right: '8vp' })
           .enterKeyType(ENTER_KEY_TYPE_DONE)
@@ -371,13 +437,13 @@ export struct VideoPlayView {
         }
           .width('36vp')
           .height('36vp')
-          .backgroundColor('#333333')
+          .backgroundColor(this.themeColors.buttonBackground)
           .borderRadius('18vp')
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
           .margin({ right: '8vp' })
           .borderWidth(1)
-          .borderColor('#FFFFFF')
+          .borderColor(this.themeColors.borderColor)
           .onClick(() => {
             this.viewModel.toggleColorPanel();
           })
@@ -385,11 +451,11 @@ export struct VideoPlayView {
         Column() {
           Text('发送')
             .fontSize('14fp')
-            .fontColor('#FFFFFF')
+            .fontColor(Color.White)
         }
           .width('62vp')
           .height('40vp')
-          .backgroundColor('#F67609')
+          .backgroundColor(this.themeColors.accentColor)
           .borderRadius('20vp')
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
@@ -425,7 +491,7 @@ export struct VideoPlayView {
         .width('100%')
         .height('48vp')
         .visibility(this.viewModel.isColorPanelVisible ? Visibility.Visible : Visibility.Hidden)
-        .backgroundColor('#222222')
+        .backgroundColor(this.themeColors.cardBackground)
         .padding({ left: '20vp', right: '20vp', top: '10vp', bottom: '10vp' })
         .borderRadius('8vp')
         .margin({ top: '8vp' })
@@ -434,7 +500,7 @@ export struct VideoPlayView {
         Text($r('app.string.Episodes'))
           .fontSize('16fp')
           .fontWeight(FontWeight.Regular)
-          .fontColor(Color.White)
+          .fontColor(this.themeColors.primaryText)
       }
       .width('100%')
       .height('20%')
@@ -447,22 +513,24 @@ export struct VideoPlayView {
               Column() {
                 Text((index + 1).toString())
                   .fontSize('20fp')
-                  .fontColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ? '#F67609' : '#FFFFFF')
+                  .fontColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
+                    this.themeColors.accentColor : this.themeColors.primaryText)
               }
               .width(40)
               .height(40)
-              .backgroundColor('#3B3A37')
+              .backgroundColor(this.themeColors.buttonBackground)
               .borderRadius($r('sys.float.corner_radius_level5'))
               .justifyContent(FlexAlign.Center)
               .alignItems(HorizontalAlign.Center)
-              .borderColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ? '#F67609' : '#3B3A37')
+              .borderColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
+                this.themeColors.accentColor : this.themeColors.borderColor)
               .borderWidth(1)
               .onClick(() => {
                 this.onVideoSelected(index, item);
               })
             }
           }, (item: resourceManager.RawFileDescriptor, index: number) => {
-            return 'item: ' + item.toString() + 'index: ' + index.toString();
+            return index.toString();
           })
         }
         .width('100%')
@@ -476,10 +544,7 @@ export struct VideoPlayView {
     }
     .width('100%')
     .height('35%')
-    .linearGradient({
-      direction: GradientDirection.Bottom,
-      colors: [[0x1b1a1c, 0], [0x000000, 0.5]]
-    })
+    .backgroundColor(this.themeColors.pageBackground)
     .visibility(this.isFullScreen ? Visibility.Hidden : Visibility.Visible)
   }
 
@@ -488,20 +553,70 @@ export struct VideoPlayView {
     Blank()
       .width('100%')
       .height('55%')
-      .backgroundColor(Color.Black)
+      .backgroundColor(this.themeColors.pageBackground)
       .visibility(this.isFullScreen ? Visibility.Hidden : Visibility.Visible)
   }
 
   @Builder
   AmbientLightControlRow() {
     Row() {
-      AmbientLightControlPanel()
+      AmbientLightControlPanel({
+        ambientLightColor: this.viewModel.ambientLightColor
+      })
+
+      Blank().width('16vp')
+
+      // Previous episode
+      Text('◁')
+        .fontSize('18fp')
+        .fontColor(this.viewModel.chooseNumber <= 0 ? this.themeColors.disabledText : this.themeColors.primaryText)
+        .width('28vp')
+        .height('28vp')
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (this.viewModel.chooseNumber > 0 && this.videoSources.length > 0) {
+            const prevIndex = this.viewModel.chooseNumber - 1;
+            this.onVideoSelected(prevIndex, this.videoSources[prevIndex]);
+          }
+        })
+
+      Blank().width('6vp')
+
+      // Next episode
+      Text('▷')
+        .fontSize('18fp')
+        .fontColor(this.viewModel.chooseNumber >= this.videoSources.length - 1 ? this.themeColors.disabledText : this.themeColors.primaryText)
+        .width('28vp')
+        .height('28vp')
+        .textAlign(TextAlign.Center)
+        .onClick(() => {
+          if (this.viewModel.chooseNumber < this.videoSources.length - 1) {
+            const nextIndex = this.viewModel.chooseNumber + 1;
+            this.onVideoSelected(nextIndex, this.videoSources[nextIndex]);
+          }
+        })
+
+      // Theme toggle button (right side)
+      Row() {
+        Text(this.themeColors.isDark ? '🌙' : '☀️')
+          .fontSize('20fp')
+      }
+      .width('36vp')
+      .height('36vp')
+      .backgroundColor(this.themeColors.buttonBackground)
+      .borderRadius('18vp')
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.toggleTheme();
+      })
     }
     .width('100%')
     .padding({ left: '20vp', right: '20vp', top: '8vp', bottom: '8vp' })
-    .justifyContent(FlexAlign.Start)
+    .justifyContent(FlexAlign.SpaceBetween)
+    .alignItems(VerticalAlign.Center)
     .visibility(this.isFullScreen ? Visibility.Hidden : Visibility.Visible)
-    .backgroundColor('#1A1A1A')
+    .backgroundColor(this.themeColors.controlBarBackground)
   }
 
   private async onVideoSelected(index: number, rawDes: resourceManager.RawFileDescriptor): Promise<void> {

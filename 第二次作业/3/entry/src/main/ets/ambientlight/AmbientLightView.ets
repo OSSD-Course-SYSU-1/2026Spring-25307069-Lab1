@@ -21,7 +21,7 @@
 @Component
 export struct AmbientLightView {
   @Consume('ambientLightEnabled') ambientLightEnabled: boolean;
-  @Consume('ambientLightColor') ambientLightColor: string;
+  @Prop ambientLightColor: string = '#FF6600';
   isFullScreen: boolean = false;
 
   // Glow thickness

@@ -14,6 +14,7 @@
  */
 
 import { FlowSpeed } from './AmbientLightTypes';
+import { ThemeColors } from '../common/ThemeColors';
 
 /**
  * Ambient Light Control Panel
@@ -21,35 +22,11 @@ import { FlowSpeed } from './AmbientLightTypes';
 @Component
 export struct AmbientLightControlPanel {
   @Consume('ambientLightEnabled') ambientLightEnabled: boolean;
-  @Consume('ambientLightColor') ambientLightColor: string;
+  @Consume('themeColors') themeColors: ThemeColors = new ThemeColors(true);
+  @Prop ambientLightColor: string = '#FF6600';
   @State isExpanded: boolean = false;
 
   private readonly BUTTON_SIZE: string = '36vp';
-  private colorTimerId: number = -1;
-  private colorIndex: number = 0;
-
-  // Demo color palette - simulates video color changes
-  private readonly demoPalette: string[] = [
-    '#FF6600', '#3366FF', '#FF3366', '#33CC66',
-    '#9933FF', '#FFCC00', '#FF3333', '#33CCCC'
-  ];
-
-  aboutToAppear() {
-    // Start color cycling timer
-    this.colorTimerId = setInterval(() => {
-      if (this.ambientLightEnabled) {
-        this.colorIndex = (this.colorIndex + 1) % this.demoPalette.length;
-        this.ambientLightColor = this.demoPalette[this.colorIndex];
-      }
-    }, 2000);
-  }
-
-  aboutToDisappear() {
-    if (this.colorTimerId !== -1) {
-      clearInterval(this.colorTimerId);
-      this.colorTimerId = -1;
-    }
-  }
 
   build() {
     Column() {
@@ -59,7 +36,7 @@ export struct AmbientLightControlPanel {
         this.ControlPanel()
       }
     }
-    .backgroundColor('#80000000')
+    .backgroundColor(this.themeColors.isDark ? '#80000000' : '#CCFFFFFF')
     .borderRadius('20vp')
     .padding(this.isExpanded ? '12vp' : '8vp')
   }
@@ -73,7 +50,7 @@ export struct AmbientLightControlPanel {
       }
       .width(this.BUTTON_SIZE)
       .height(this.BUTTON_SIZE)
-      .backgroundColor(this.ambientLightEnabled ? '#F67609' : '#444444')
+      .backgroundColor(this.ambientLightEnabled ? this.themeColors.accentColor : this.themeColors.buttonBackground)
       .borderRadius('18vp')
       .onClick(() => {
         this.ambientLightEnabled = !this.ambientLightEnabled;
@@ -83,12 +60,12 @@ export struct AmbientLightControlPanel {
         Button() {
           Text(this.isExpanded ? '▼' : '▶')
             .fontSize('14fp')
-            .fontColor(Color.White)
+            .fontColor(this.themeColors.primaryText)
         }
         .width('28vp')
         .height('28vp')
         .margin({ left: '8vp' })
-        .backgroundColor('#333333')
+        .backgroundColor(this.themeColors.buttonBackground)
         .borderRadius('14vp')
         .onClick(() => {
           this.isExpanded = !this.isExpanded;
@@ -105,14 +82,14 @@ export struct AmbientLightControlPanel {
       Row()
         .width('100%')
         .height('1vp')
-        .backgroundColor('#444444')
+        .backgroundColor(this.themeColors.dividerColor)
         .margin({ top: '8vp', bottom: '8vp' })
 
       // Current color preview
       Row() {
         Text('当前颜色')
           .fontSize('12fp')
-          .fontColor(Color.White)
+          .fontColor(this.themeColors.primaryText)
         Column()
           .width('24vp')
           .height('24vp')
