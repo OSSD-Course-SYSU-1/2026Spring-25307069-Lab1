@@ -16,10 +16,13 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { resourceManager } from '@kit.LocalizationKit';
+import { picker } from '@kit.CoreFileKit';
 import { PlayerState } from '../model/PlayerStateModel';
+import { LocalVideoFile } from '../model/LocalVideoFile';
 import { CommonConstants as Const } from '../common/CommonConstants';
 import player from 'libplayer.so';
 import { AmbientLightManager } from '../ambientlight/AmbientLightManager';
+import { AVPlayerManager } from '../player/AVPlayerManager';
 
 const DOMAIN = 0x0000;
 const TAG = 'VideoPlayViewModel';
@@ -34,6 +37,20 @@ export interface DanmakuItem {
 
 export interface WindowSystemBarProperties {
   statusBarContentColor: string;
+}
+
+/**
+ * 流转数据接口 - 用于跨设备迁移时保存/恢复播放状态
+ */
+export interface ContinueData {
+  chooseNumber: number;
+  currentTime: number;
+  durationTime: number;
+  chooseSpeed: number;
+  speedText: string;
+  playState: number;
+  ambientLightEnabled: boolean;
+  ambientLightColor: string;
 }
 
 @Observed
@@ -70,6 +87,14 @@ export class VideoPlayViewModel {
   ];
 
   public videoSources: resourceManager.RawFileDescriptor[] = [];
+  // Local video files selected by user
+  @Track localVideoFiles: LocalVideoFile[] = [];
+  // AVPlayer for local/network video playback
+  avPlayerManager: AVPlayerManager = new AVPlayerManager();
+  // Whether currently using AVPlayer (local video) or native player (rawfile)
+  @Track isUsingAVPlayer: boolean = false;
+  // AVPlayer surface ID
+  private avPlayerSurfaceId: string = '';
   private danmakuIdCounter: number = 0;
   public nativePlayerObj: bigint = BigInt(0);
   private timerId: number = -1;
@@ -247,6 +272,21 @@ export class VideoPlayViewModel {
   }
 
   togglePlayPause(playState: PlayerState): PlayerState {
+    if (this.isUsingAVPlayer) {
+      // Use AVPlayer
+      if (playState === PlayerState.PLAYING) {
+        this.avPlayerManager.pause();
+        this.stopControlsHideTimer();
+        return PlayerState.PAUSE;
+      } else if (playState === PlayerState.PAUSE) {
+        this.avPlayerManager.resume();
+        this.startControlsHideTimer();
+        return PlayerState.PLAYING;
+      }
+      return playState;
+    }
+
+    // Use native player
     if (this.nativePlayerObj === BigInt(0)) {
       return playState;
     }
@@ -265,6 +305,14 @@ export class VideoPlayViewModel {
   }
 
   async performSeek(value: number): Promise<void> {
+    if (this.isUsingAVPlayer) {
+      await this.avPlayerManager.seek(value * 1000); // seconds to ms
+      setTimeout(() => {
+        this.isSeek = false;
+      }, Const.RELOAD_TIME);
+      return;
+    }
+
     if (this.nativePlayerObj === BigInt(0)) {
       this.isSeek = false;
       return;
@@ -352,6 +400,121 @@ export class VideoPlayViewModel {
     }
   }
 
+  /**
+   * Select local video file using FilePicker
+   */
+  async selectLocalVideo(): Promise<string | null> {
+    try {
+      const documentSelectOptions = new picker.DocumentSelectOptions();
+      documentSelectOptions.fileSuffixFilters = ['.mp4', '.mov', '.avi', '.mkv'];
+      documentSelectOptions.maxSelectNumber = 1;
+
+      const documentPicker = new picker.DocumentViewPicker();
+      const result = await documentPicker.select(documentSelectOptions);
+
+      if (result && result.length > 0) {
+        const uri = result[0];
+        const fileName = uri.substring(uri.lastIndexOf('/') + 1);
+        const localFile = new LocalVideoFile(fileName, uri);
+        this.localVideoFiles.push(localFile);
+        hilog.info(DOMAIN, TAG, `Selected local video: ${fileName}, uri: ${uri}`);
+        return uri;
+      }
+      return null;
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `Failed to select local video: ${error.code}, ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Initialize AVPlayer with surface ID
+   */
+  async initAVPlayer(surfaceId: string): Promise<void> {
+    this.avPlayerSurfaceId = surfaceId;
+    await this.avPlayerManager.init(surfaceId);
+
+    // Setup callbacks to sync with ViewModel state
+    this.avPlayerManager.onTimeUpdate = (timeMs: number) => {
+      if (this.isUsingAVPlayer) {
+        this.currentTime = timeMs / 1000; // ms to seconds
+      }
+    };
+
+    this.avPlayerManager.onDurationUpdate = (durationMs: number) => {
+      if (this.isUsingAVPlayer) {
+        this.durationTime = durationMs / 1000; // ms to seconds
+      }
+    };
+
+    this.avPlayerManager.onStateChange = (state: string) => {
+      if (!this.isUsingAVPlayer) return;
+      if (state === 'playing') {
+        this.playState = PlayerState.PLAYING;
+      } else if (state === 'paused') {
+        this.playState = PlayerState.PAUSE;
+      }
+    };
+
+    this.avPlayerManager.onError = (error) => {
+      hilog.error(DOMAIN, TAG, `AVPlayer error: ${error.message}`);
+    };
+
+    hilog.info(DOMAIN, TAG, `AVPlayer initialized with surfaceId: ${surfaceId}`);
+  }
+
+  /**
+   * Play a local video file via AVPlayer
+   */
+  async playLocalVideo(uri: string): Promise<void> {
+    this.isSwitchEnable = false;
+    this.isUsingAVPlayer = true;
+    this.durationTime = 0;
+    this.currentTime = 0;
+    this.isUse = true;
+    this.controlsVisible = true;
+    this.startControlsHideTimer();
+
+    // Release native player if running
+    await this.releasePlayer();
+
+    try {
+      await this.avPlayerManager.setSource(uri);
+      this.isSwitchEnable = true;
+      hilog.info(DOMAIN, TAG, `Playing local video: ${uri}`);
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `Failed to play local video`);
+      this.isUsingAVPlayer = false;
+      this.isSwitchEnable = true;
+    }
+  }
+
+  /**
+   * Switch back to native player (rawfile video)
+   */
+  async switchToNativePlayer(index: number, rawDes: resourceManager.RawFileDescriptor): Promise<void> {
+    this.isUsingAVPlayer = false;
+    this.isSwitchEnable = false;
+
+    // Release AVPlayer
+    try {
+      await this.avPlayerManager.release();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `Failed to release AVPlayer`);
+    }
+
+    // Re-init AVPlayer for future use
+    if (this.avPlayerSurfaceId) {
+      await this.initAVPlayer(this.avPlayerSurfaceId);
+    }
+
+    // Play with native player
+    const result = await this.onVideoSelected(index, rawDes);
+    if (result !== null) {
+      this.playState = result;
+    }
+  }
+
   selectDanmakuColor(color: string): void {
     this.selectedDanmakuColor = color;
     hilog.info(DOMAIN, TAG, `Selected danmaku color: ${color}`);
@@ -391,11 +554,20 @@ export class VideoPlayViewModel {
   onSpeedSelected(speed: number, index: number): void {
     if (this.chooseSpeed !== speed) {
       this.chooseSpeed = speed;
-      if (this.nativePlayerObj !== BigInt(0)) {
-        player.setSpeed(this.nativePlayerObj, speed);
-      }
+      this.setSpeed(speed);
       this.speedText = Const.VIDEO_SPEED_TEXT_ARR[index];
       this.isSpeedListVisible = false;
+    }
+  }
+
+  async setSpeed(speed: number): Promise<void> {
+    if (this.isUsingAVPlayer) {
+      await this.avPlayerManager.setSpeed(speed);
+      return;
+    }
+
+    if (this.nativePlayerObj !== BigInt(0)) {
+      player.setSpeed(this.nativePlayerObj, speed);
     }
   }
 
@@ -453,6 +625,12 @@ export class VideoPlayViewModel {
         hilog.error(DOMAIN, TAG, `Release player failed: ${error.code}, message: ${error.message}`);
       }
     }
+    // Also release AVPlayer
+    try {
+      await this.avPlayerManager.release();
+    } catch (error) {
+      hilog.error(DOMAIN, TAG, `Release AVPlayer failed`);
+    }
   }
 
   // === Gesture Control Methods ===
@@ -461,6 +639,12 @@ export class VideoPlayViewModel {
    * Seek forward/backward by delta seconds
    */
   async seekByDelta(deltaSeconds: number): Promise<void> {
+    if (this.isUsingAVPlayer) {
+      const newTime = Math.max(0, Math.min(this.currentTime + deltaSeconds, this.durationTime));
+      await this.performSeek(newTime);
+      hilog.info(DOMAIN, TAG, `Seek by ${deltaSeconds}s to ${newTime}s (AVPlayer)`);
+      return;
+    }
     if (this.nativePlayerObj === BigInt(0) || !this.isUse) {
       return;
     }
@@ -479,6 +663,43 @@ export class VideoPlayViewModel {
       this.ambientLightManager.release();
     } catch (error) {
       hilog.error(0x0000, TAG, `cleanup catch error, code: ${error.code}, message: ${error.message}`);
+    }
+  }
+
+  // === Continuation (Free Flow) Methods ===
+
+  /**
+   * 序列化当前播放状态（用于跨端迁移）
+   */
+  serializeContinueData(): ContinueData {
+    return {
+      chooseNumber: this.chooseNumber,
+      currentTime: this.currentTime,
+      durationTime: this.durationTime,
+      chooseSpeed: this.chooseSpeed,
+      speedText: typeof this.speedText === 'string' ? this.speedText : '1.0X',
+      playState: this.playState,
+      ambientLightEnabled: false,
+      ambientLightColor: this.ambientLightColor,
+    };
+  }
+
+  /**
+   * 从流转数据恢复状态（不自动播放，等待用户操作）
+   */
+  restoreFromContinueData(data: ContinueData): void {
+    this.chooseNumber = data.chooseNumber;
+    this.currentTime = data.currentTime;
+    this.durationTime = data.durationTime;
+    this.chooseSpeed = data.chooseSpeed;
+    this.playState = PlayerState.PAUSE;
+    this.ambientLightColor = data.ambientLightColor;
+    // 恢复倍速文本
+    const speedIndex = Const.VIDEO_SPEED_ARR.indexOf(data.chooseSpeed);
+    if (speedIndex >= 0) {
+      this.speedText = Const.VIDEO_SPEED_TEXT_ARR[speedIndex];
+    } else {
+      this.speedText = '1.0X';
     }
   }
 }

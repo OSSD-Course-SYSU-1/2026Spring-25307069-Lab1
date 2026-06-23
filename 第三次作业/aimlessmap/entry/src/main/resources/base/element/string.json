@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "无目的地图 - 随心漫步应用"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "无目的地图应用入口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "无目的地图"
+    },
+    {
+      "name": "location_reason",
+      "value": "需要获取您的位置信息以生成随机漫步目标点"
+    },
+    {
+      "name": "camera_reason",
+      "value": "需要使用相机为漫步记录拍照"
+    },
+    {
+      "name": "album_reason",
+      "value": "需要访问相册以选择漫步照片"
+    }
+  ]
+}

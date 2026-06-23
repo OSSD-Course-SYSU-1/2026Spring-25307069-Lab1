@@ -18,6 +18,7 @@ import { resourceManager } from '@kit.LocalizationKit';
 import { window } from '@kit.ArkUI';
 import { getShowTime } from '../common/TimeUtils';
 import { PlayerState } from '../model/PlayerStateModel';
+import { LocalVideoFile } from '../model/LocalVideoFile';
 import { CommonConstants as Const } from '../common/CommonConstants';
 import { VideoPlayViewModel, DanmakuItem } from '../viewmodel/VideoPlayViewModel';
 import { AmbientLightView } from '../ambientlight/AmbientLightView';
@@ -35,10 +36,8 @@ const ENTER_KEY_TYPE_DONE = 6;
 export struct VideoPlayView {
   @ObjectLink viewModel: VideoPlayViewModel;
   @Link videoSources: resourceManager.RawFileDescriptor[];
-  // [Start isFullScreen]
-  // The horizontal full-screen playback state flag.
   @Watch('fullScreenSet') @Link isFullScreen: boolean;
-  // [End isFullScreen]
+  @Prop currentBreakpoint: string = 'sm';
 
   // Shared state for ambient light - enabled state only
   @Provide('ambientLightEnabled') ambientLightEnabled: boolean = false;
@@ -58,6 +57,18 @@ export struct VideoPlayView {
   @State localSliderValue: number = 0;
   private isSliderDragging: boolean = false;
   private sliderSyncTimerId: number = -1;
+  // AVPlayer XComponent controller
+  private avPlayerXComponentController: XComponentController = new XComponentController();
+  private avPlayerInitialized: boolean = false;
+
+  // Breakpoint helpers
+  private get isLargeScreen(): boolean {
+    return this.currentBreakpoint === 'lg';
+  }
+
+  private get isMediumScreen(): boolean {
+    return this.currentBreakpoint === 'md';
+  }
 
   aboutToAppear(): void {
     this.viewModel.videoSources = this.videoSources;
@@ -78,9 +89,7 @@ export struct VideoPlayView {
     this.viewModel.cleanup();
   }
 
-  // [Start fullScreenSet]
   fullScreenSet() {
-    // Change window orientation and layout when setting full screen.
     window.getLastWindow(this.getUIContext().getHostContext()).then((topWindow) => {
       topWindow.setPreferredOrientation(this.isFullScreen ?
         window.Orientation.AUTO_ROTATION_LANDSCAPE : window.Orientation.PORTRAIT).catch((error: BusinessError) => {
@@ -94,21 +103,35 @@ export struct VideoPlayView {
       hilog.error(DOMAIN, TAG, `Failed to getLastWindow. Cause: ${error.code}, message: ${error.message}`);
     });
   }
-  // [End fullScreenSet]
 
   build() {
+    if (this.isFullScreen) {
+      // Full screen mode: unified layout across all breakpoints
+      this.FullScreenLayout()
+    } else if (this.isLargeScreen) {
+      // Large screen layout: side-by-side split layout
+      this.LargeScreenLayout()
+    } else {
+      // sm/md: portrait layout (existing layout, video area slightly larger for md)
+      this.NormalLayout()
+    }
+  }
+
+  // === Full Screen Layout (all breakpoints unified) ===
+  @Builder
+  FullScreenLayout() {
     Column() {
-      // Outer Stack: video + ambient glow (glow extends beyond video edges)
       Stack({ alignContent: Alignment.Center }) {
         this.AmbientLightOverlay()
         Stack({ alignContent: Alignment.Center }) {
           this.XComponentView()
+          this.AVPlayerView()
           this.DanmakuOverlay()
           this.ControlOverlay()
           this.SpeedListOverlay()
         }
         .width('100%')
-        .height(this.isFullScreen ? '100%' : '100%')
+        .height('100%')
         .clip(true)
         .parallelGesture(
           TapGesture({ count: 1 })
@@ -137,12 +160,126 @@ export struct VideoPlayView {
         )
       }
       .width('100%')
-      .height(this.isFullScreen ? '100%' : '35%')
+      .height('100%')
+      .clip(false)
+    }
+    .height('100%')
+    .width('100%')
+    .backgroundColor(Color.Black)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+  }
+
+  // === Large Screen Side-by-Side Layout (lg breakpoint) ===
+  @Builder
+  LargeScreenLayout() {
+    Row() {
+      // Left: Video playback area (7 columns weight)
+      Column() {
+        Stack({ alignContent: Alignment.Center }) {
+          this.AmbientLightOverlay()
+          Stack({ alignContent: Alignment.Center }) {
+            this.XComponentView()
+            this.AVPlayerView()
+            this.DanmakuOverlay()
+            this.ControlOverlay()
+            this.SpeedListOverlay()
+          }
+          .width('100%')
+          .height('100%')
+          .clip(true)
+          .parallelGesture(
+            TapGesture({ count: 1 })
+              .onAction(() => {
+                if (this.viewModel.isUse) {
+                  this.viewModel.toggleControls();
+                }
+              })
+          )
+          .parallelGesture(
+            PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 20 })
+              .onActionStart((event: GestureEvent) => {
+                this.gestureStartX = event.fingerList[0].localX;
+                this.gestureSeekDelta = 0;
+              })
+              .onActionUpdate((event: GestureEvent) => {
+                const deltaX = event.fingerList[0].localX - this.gestureStartX;
+                this.gestureSeekDelta = (deltaX / 100) * 30;
+              })
+              .onActionEnd(() => {
+                if (Math.abs(this.gestureSeekDelta) > 0.5) {
+                  this.viewModel.seekByDelta(this.gestureSeekDelta);
+                }
+                this.gestureSeekDelta = 0;
+              })
+          )
+        }
+        .width('100%')
+        .height('100%')
+        .clip(false)
+      }
+      .layoutWeight(7)
+
+      // Right: Selection / Danmaku / Control panel (5 columns weight)
+      Column() {
+        this.AmbientLightControlRow()
+        this.VideoSelectionView()
+      }
+      .layoutWeight(5)
+      .height('100%')
+      .backgroundColor(this.themeColors.pageBackground)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(Color.Black)
+  }
+
+  // === Normal Portrait Layout (sm/md) ===
+  @Builder
+  NormalLayout() {
+    Column() {
+      Stack({ alignContent: Alignment.Center }) {
+        this.AmbientLightOverlay()
+        Stack({ alignContent: Alignment.Center }) {
+          this.XComponentView()
+          this.AVPlayerView()
+          this.DanmakuOverlay()
+          this.ControlOverlay()
+          this.SpeedListOverlay()
+        }
+        .width('100%')
+        .height('100%')
+        .clip(true)
+        .parallelGesture(
+          TapGesture({ count: 1 })
+            .onAction(() => {
+              if (this.viewModel.isUse) {
+                this.viewModel.toggleControls();
+              }
+            })
+        )
+        .parallelGesture(
+          PanGesture({ fingers: 1, direction: PanDirection.Horizontal, distance: 20 })
+            .onActionStart((event: GestureEvent) => {
+              this.gestureStartX = event.fingerList[0].localX;
+              this.gestureSeekDelta = 0;
+            })
+            .onActionUpdate((event: GestureEvent) => {
+              const deltaX = event.fingerList[0].localX - this.gestureStartX;
+              this.gestureSeekDelta = (deltaX / 100) * 30;
+            })
+            .onActionEnd(() => {
+              if (Math.abs(this.gestureSeekDelta) > 0.5) {
+                this.viewModel.seekByDelta(this.gestureSeekDelta);
+              }
+              this.gestureSeekDelta = 0;
+            })
+        )
+      }
+      .width('100%')
+      .height(this.isMediumScreen ? '50%' : '35%')
       .clip(false)
 
-      // Ambient Light Control - placed right below video, before other content
       this.AmbientLightControlRow()
-
       this.VideoSelectionView()
       this.VideoPlaceholderView()
     }
@@ -154,7 +291,6 @@ export struct VideoPlayView {
 
   @Builder
   XComponentView() {
-    // [Start XComponent]
     XComponent({
       id: 'playerXC',
       type: XComponentType.SURFACE,
@@ -163,7 +299,28 @@ export struct VideoPlayView {
       .width(WIDTH_SIZE)
       .height(this.isFullScreen ? NORMAL_SIZE : FULL_SIZE)
       .zIndex(0)
-    // [End XComponent]
+      .visibility(this.viewModel.isUsingAVPlayer ? Visibility.Hidden : Visibility.Visible)
+  }
+
+  @Builder
+  AVPlayerView() {
+    // AVPlayer XComponent (for local/network videos)
+    XComponent({
+      id: 'avPlayerXC',
+      type: XComponentType.SURFACE,
+      controller: this.avPlayerXComponentController
+    })
+      .width(WIDTH_SIZE)
+      .height(this.isFullScreen ? NORMAL_SIZE : FULL_SIZE)
+      .zIndex(0)
+      .visibility(this.viewModel.isUsingAVPlayer ? Visibility.Visible : Visibility.Hidden)
+      .onLoad(() => {
+        if (!this.avPlayerInitialized) {
+          const surfaceId = this.avPlayerXComponentController.getXComponentSurfaceId();
+          this.viewModel.initAVPlayer(surfaceId);
+          this.avPlayerInitialized = true;
+        }
+      })
   }
 
   @Builder
@@ -253,7 +410,7 @@ export struct VideoPlayView {
       this.FullScreenButton()
     }
     .width('100%')
-    .height('16%')
+    .height(this.isLargeScreen ? '12%' : '16%')
     .padding(this.isFullScreen ? { left: '36vp', right: '36vp' } : 0)
     .justifyContent(FlexAlign.SpaceBetween)
     .visibility(this.viewModel.isSpeedListVisible ? Visibility.Hidden : Visibility.Visible)
@@ -264,13 +421,13 @@ export struct VideoPlayView {
     Row() {
       Image(this.viewModel.playState === PlayerState.PLAYING ?
         $r('app.media.ic_public_pause') : $r('app.media.ic_public_play'))
-        .width('25vp')
-        .height('25vp')
+        .width(this.isLargeScreen ? '35vp' : '25vp')
+        .height(this.isLargeScreen ? '35vp' : '25vp')
         .onClick(() => {
           this.viewModel.playState = this.viewModel.togglePlayPause(this.viewModel.playState);
         })
     }
-    .width('25vp')
+    .width(this.isLargeScreen ? '35vp' : '25vp')
     .height('100%')
     .justifyContent(FlexAlign.Center)
   }
@@ -400,7 +557,7 @@ export struct VideoPlayView {
     Column() {
       Row() {
         Text($r('app.string.Video_name'))
-          .fontSize('24fp')
+          .fontSize(this.isLargeScreen ? '28fp' : '24fp')
           .fontWeight(FontWeight.Bold)
           .fontColor(this.themeColors.primaryText)
       }
@@ -413,7 +570,7 @@ export struct VideoPlayView {
           placeholder: '请输入弹幕内容',
           text: this.viewModel.danmakuInputText
         })
-          .width('160vp')
+          .width(this.isLargeScreen ? '300vp' : '160vp')
           .height('40vp')
           .fontSize('14fp')
           .fontColor(this.themeColors.primaryText)
@@ -506,44 +663,173 @@ export struct VideoPlayView {
       .height('20%')
       .padding({ left: '20vp', right: '20vp' })
 
-      Row() {
-        List({ space: '16vp', initialIndex: 0 }) {
+      if (this.isLargeScreen) {
+        // Large screen: Grid layout (3 columns)
+        Grid() {
           ForEach(this.videoSources, (item: resourceManager.RawFileDescriptor, index: number) => {
-            ListItem() {
-              Column() {
-                Text((index + 1).toString())
-                  .fontSize('20fp')
-                  .fontColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
-                    this.themeColors.accentColor : this.themeColors.primaryText)
-              }
-              .width(40)
-              .height(40)
-              .backgroundColor(this.themeColors.buttonBackground)
-              .borderRadius($r('sys.float.corner_radius_level5'))
-              .justifyContent(FlexAlign.Center)
-              .alignItems(HorizontalAlign.Center)
-              .borderColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
-                this.themeColors.accentColor : this.themeColors.borderColor)
-              .borderWidth(1)
-              .onClick(() => {
-                this.onVideoSelected(index, item);
-              })
+            GridItem() {
+              Text((index + 1).toString())
+                .fontSize('20fp')
+                .fontColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
+                  this.themeColors.accentColor : this.themeColors.primaryText)
+                .width(60)
+                .height(60)
+                .backgroundColor(this.themeColors.buttonBackground)
+                .borderRadius($r('sys.float.corner_radius_level5'))
+                .textAlign(TextAlign.Center)
+                .onClick(() => {
+                  if (this.viewModel.isUsingAVPlayer) {
+                    this.viewModel.switchToNativePlayer(index, item);
+                  } else {
+                    this.onVideoSelected(index, item);
+                  }
+                })
             }
           }, (item: resourceManager.RawFileDescriptor, index: number) => {
             return index.toString();
           })
+
+          // Local video items (large screen)
+          ForEach(this.viewModel.localVideoFiles, (item: LocalVideoFile, index: number) => {
+            GridItem() {
+              Text('📁')
+                .fontSize('24fp')
+                .width(60)
+                .height(60)
+                .backgroundColor(this.viewModel.isUsingAVPlayer ?
+                  this.themeColors.accentColor : this.themeColors.buttonBackground)
+                .borderRadius($r('sys.float.corner_radius_level5'))
+                .textAlign(TextAlign.Center)
+                .onClick(() => {
+                  this.viewModel.playLocalVideo(item.uri);
+                })
+            }
+          }, (item: LocalVideoFile, index: number) => {
+            return 'local_' + index.toString();
+          })
+
+          // Add local video button (large screen)
+          GridItem() {
+            Text('+')
+              .fontSize('28fp')
+              .fontColor(this.themeColors.secondaryText)
+              .width(60)
+              .height(60)
+              .backgroundColor(this.themeColors.inputBackground)
+              .borderRadius($r('sys.float.corner_radius_level5'))
+              .textAlign(TextAlign.Center)
+              .borderWidth(1)
+              .borderColor(this.themeColors.borderColor)
+              .borderStyle(BorderStyle.Dashed)
+              .onClick(async () => {
+                const uri = await this.viewModel.selectLocalVideo();
+                if (uri) {
+                  this.viewModel.playLocalVideo(uri);
+                }
+              })
+          }
+        }
+        .columnsTemplate('1fr 1fr 1fr')
+        .columnsGap('12vp')
+        .rowsGap('12vp')
+        .width('100%')
+        .padding({ left: '20vp', right: '20vp' })
+      } else {
+        // sm/md: horizontal List layout
+        Row() {
+          List({ space: '16vp', initialIndex: 0 }) {
+            ForEach(this.videoSources, (item: resourceManager.RawFileDescriptor, index: number) => {
+              ListItem() {
+                Column() {
+                  Text((index + 1).toString())
+                    .fontSize('20fp')
+                    .fontColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
+                      this.themeColors.accentColor : this.themeColors.primaryText)
+                }
+                .width(40)
+                .height(40)
+                .backgroundColor(this.themeColors.buttonBackground)
+                .borderRadius($r('sys.float.corner_radius_level5'))
+                .justifyContent(FlexAlign.Center)
+                .alignItems(HorizontalAlign.Center)
+                .borderColor(this.viewModel.chooseNumber === index && this.viewModel.isUse ?
+                  this.themeColors.accentColor : this.themeColors.borderColor)
+                .borderWidth(1)
+                .onClick(() => {
+                  if (this.viewModel.isUsingAVPlayer) {
+                    // Switch back to native player
+                    this.viewModel.switchToNativePlayer(index, item);
+                  } else {
+                    this.onVideoSelected(index, item);
+                  }
+                })
+              }
+            }, (item: resourceManager.RawFileDescriptor, index: number) => {
+              return index.toString();
+            })
+
+            // Local video items
+            ForEach(this.viewModel.localVideoFiles, (item: LocalVideoFile, index: number) => {
+              ListItem() {
+                Column() {
+                  Text('📁')
+                    .fontSize('16fp')
+                }
+                .width(40)
+                .height(40)
+                .backgroundColor(this.viewModel.isUsingAVPlayer ?
+                  this.themeColors.accentColor : this.themeColors.buttonBackground)
+                .borderRadius($r('sys.float.corner_radius_level5'))
+                .justifyContent(FlexAlign.Center)
+                .alignItems(HorizontalAlign.Center)
+                .borderColor(this.viewModel.isUsingAVPlayer ?
+                  this.themeColors.accentColor : this.themeColors.borderColor)
+                .borderWidth(1)
+                .onClick(() => {
+                  this.viewModel.playLocalVideo(item.uri);
+                })
+              }
+            }, (item: LocalVideoFile, index: number) => {
+              return 'local_' + index.toString();
+            })
+
+            // Add local video button
+            ListItem() {
+              Column() {
+                Text('+')
+                  .fontSize('24fp')
+                  .fontColor(this.themeColors.secondaryText)
+              }
+              .width(40)
+              .height(40)
+              .backgroundColor(this.themeColors.inputBackground)
+              .borderRadius($r('sys.float.corner_radius_level5'))
+              .justifyContent(FlexAlign.Center)
+              .alignItems(HorizontalAlign.Center)
+              .borderColor(this.themeColors.borderColor)
+              .borderWidth(1)
+              .borderStyle(BorderStyle.Dashed)
+              .onClick(async () => {
+                const uri = await this.viewModel.selectLocalVideo();
+                if (uri) {
+                  this.viewModel.playLocalVideo(uri);
+                }
+              })
+            }
+          }
+          .width('100%')
+          .height('100%')
+          .listDirection(Axis.Horizontal)
+          .enabled(this.viewModel.isSwitchEnable || this.viewModel.localVideoFiles.length > 0)
         }
         .width('100%')
-        .height('100%')
-        .listDirection(Axis.Horizontal)
-        .enabled(this.viewModel.isSwitchEnable)
+        .height('30%')
+        .padding({ left: '20vp', right: '20vp' })
       }
-      .width('100%')
-      .height('30%')
-      .padding({ left: '20vp', right: '20vp' })
     }
     .width('100%')
-    .height('35%')
+    .height(this.isLargeScreen ? undefined : '35%')
+    .layoutWeight(this.isLargeScreen ? 1 : 0)
     .backgroundColor(this.themeColors.pageBackground)
     .visibility(this.isFullScreen ? Visibility.Hidden : Visibility.Visible)
   }
@@ -552,9 +838,9 @@ export struct VideoPlayView {
   VideoPlaceholderView() {
     Blank()
       .width('100%')
-      .height('55%')
+      .height(this.isLargeScreen ? '0%' : '55%')
       .backgroundColor(this.themeColors.pageBackground)
-      .visibility(this.isFullScreen ? Visibility.Hidden : Visibility.Visible)
+      .visibility(this.isFullScreen || this.isLargeScreen ? Visibility.Hidden : Visibility.Visible)
   }
 
   @Builder

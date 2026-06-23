@@ -1,0 +1,10 @@
+{
+  "src": [
+    "pages/SplashPage",
+    "pages/HomePage",
+    "pages/WalkPage",
+    "pages/WalkSummaryPage",
+    "pages/RecordPage",
+    "pages/SettingsPage"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "app": {
+    "signingConfigs": [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\LEGION\\.ohos\\config\\default_aimlessmap_s0rkO5b4vf_DrsseiVF04cQ_6sXrj-jhPisnKZFp1XE=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A8CD5C7C3C63413C471EAF29F01CD6774B2D75E6A71E57785D728C6C15D208E563DDD6293583B",
+          "profile": "C:\\Users\\LEGION\\.ohos\\config\\default_aimlessmap_s0rkO5b4vf_DrsseiVF04cQ_6sXrj-jhPisnKZFp1XE=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\LEGION\\.ohos\\config\\default_aimlessmap_s0rkO5b4vf_DrsseiVF04cQ_6sXrj-jhPisnKZFp1XE=.p12",
+          "storePassword": "0000001A4CAC4938B65F8BE9B6B1797949E4976BC7885AC1AE05AF4C7277D6E1F561D6C7DF4A38E64823"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        "targetSdkVersion": "6.0.2(22)",
+        "compatibleSdkVersion": "6.0.2(22)",
+        "runtimeOS": "HarmonyOS",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug",
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}
